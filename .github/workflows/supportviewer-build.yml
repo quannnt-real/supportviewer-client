@@ -1,0 +1,21 @@
+name: SupportViewer build
+
+# Chi chay khi bam tay (Actions -> SupportViewer build -> Run workflow).
+# Ban build CHUNG: khong chua dia chi server, key hay cau hinh nao.
+# Cau hinh (custom.txt da ky) do trang quan tri SupportViewer tao va goi kem khi tai.
+on:
+  workflow_dispatch:
+    inputs:
+      upload-tag:
+        description: "Ten tag release de dinh file build"
+        type: string
+        default: "sv-1.5.1"
+
+jobs:
+  build:
+    uses: ./.github/workflows/flutter-build.yml
+    secrets: inherit
+    with:
+      upload-artifact: true
+      upload-tag: ${{ inputs.upload-tag }}
+      publish-update-metadata: false
