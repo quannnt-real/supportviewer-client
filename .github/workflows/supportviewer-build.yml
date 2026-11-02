@@ -9,7 +9,7 @@ on:
       upload-tag:
         description: "Ten tag release de dinh file build"
         type: string
-        default: "sv-1.5.1"
+        default: "sv-1.5.2"
 
 jobs:
   build:

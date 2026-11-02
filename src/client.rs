@@ -475,8 +475,13 @@ impl Client {
         } else {
             if other_server == PUBLIC_SERVER {
                 (
-                    check_port(RENDEZVOUS_SERVERS[0], RENDEZVOUS_PORT),
-                    RENDEZVOUS_SERVERS[1..]
+                    RENDEZVOUS_SERVERS
+                        .first()
+                        .map(|s| check_port(s, RENDEZVOUS_PORT))
+                        .unwrap_or_default(),
+                    RENDEZVOUS_SERVERS
+                        .get(1..)
+                        .unwrap_or_default()
                         .iter()
                         .map(|x| x.to_string())
                         .collect(),

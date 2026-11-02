@@ -276,8 +276,8 @@ docopt = "1.1"
 tokio = "1.44"
 
 [package.metadata.bundle]
-name = "RustDesk"
-identifier = "com.carriez.rustdesk"
+name = "SupportViewer"
+identifier = "com.supportviewer.desktop"
 icon = ["res/32x32.png", "res/128x128.png", "res/128x128@2x.png"]
 osx_minimum_system_version = "10.14"
 
