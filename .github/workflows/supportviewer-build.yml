@@ -13,6 +13,9 @@ on:
 
 jobs:
   build:
+    # Tao release va dinh file build can quyen ghi (repo mac dinh chi cho doc)
+    permissions:
+      contents: write
     uses: ./.github/workflows/flutter-build.yml
     secrets: inherit
     with:
