@@ -740,7 +740,7 @@ fn import_config(path: &str) {
         log::info!("Empty source config, skipped");
     }
     let config2: Config2 = load_path(path2.into());
-    if !config2.is_empty() {
+    if !config2.options.is_empty() {
         if let Err(e) = store_path(Config2::file(), config2) {
             log::error!("failed to write config2 to {:?}: {}", Config2::file(), e);
         } else {

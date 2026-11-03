@@ -1774,7 +1774,9 @@ if exist \"{tmp_path}\\{app_name} Tray.lnk\" del /f /q \"{tmp_path}\\{app_name} 
         .unwrap_or_default();
     let sync_system_config = if !user_config_dir.is_empty() {
         format!(
-            "md \"%SystemRoot%\\System32\\config\\systemprofile\\AppData\\Roaming\\{app_name}\\config\" 2>nul\r\n\
+            "md \"%SystemRoot%\\ServiceProfiles\\LocalService\\AppData\\Roaming\\{app_name}\\config\" 2>nul\r\n\
+             if exist \"{user_config_dir}\\*.toml\" copy /Y \"{user_config_dir}\\*.toml\" \"%SystemRoot%\\ServiceProfiles\\LocalService\\AppData\\Roaming\\{app_name}\\config\\\"\r\n\
+             md \"%SystemRoot%\\System32\\config\\systemprofile\\AppData\\Roaming\\{app_name}\\config\" 2>nul\r\n\
              if exist \"{user_config_dir}\\*.toml\" copy /Y \"{user_config_dir}\\*.toml\" \"%SystemRoot%\\System32\\config\\systemprofile\\AppData\\Roaming\\{app_name}\\config\\\""
         )
     } else {
