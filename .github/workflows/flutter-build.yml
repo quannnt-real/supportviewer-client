@@ -332,6 +332,11 @@ jobs:
           # --hwcodec is shared by all Windows targets; per-target extras (e.g. --vram) come from the matrix
           python3 .\build.py --portable --flutter --skip-portable-pack --hwcodec ${{ matrix.job.build-args }}
           mv ./flutter/build/windows/${{ matrix.job.flutter-arch }}/runner/Release ./rustdesk
+          if (Test-Path ./rustdesk/SupportViewer.exe -PathType Leaf) {
+            Copy-Item -Force ./rustdesk/SupportViewer.exe ./rustdesk/rustdesk.exe
+          } elseif (Test-Path ./rustdesk/rustdesk.exe -PathType Leaf) {
+            Copy-Item -Force ./rustdesk/rustdesk.exe ./rustdesk/SupportViewer.exe
+          }
 
           # Download usbmmidd_v2.zip and extract it to ./rustdesk
           Invoke-WebRequest -Uri https://github.com/rustdesk-org/rdev/releases/download/usbmmidd_v2/usbmmidd_v2.zip -OutFile usbmmidd_v2.zip
@@ -472,7 +477,9 @@ jobs:
           sed -i '/dpiAware/d' res/manifest.xml
           pushd ./libs/portable
           pip3 install -r requirements.txt
-          python3 ./generate.py -f ../../rustdesk/ -o . -e ../../rustdesk/rustdesk.exe
+          MAIN_EXE="SupportViewer.exe"
+          if [ ! -f "../../rustdesk/SupportViewer.exe" ]; then MAIN_EXE="rustdesk.exe"; fi
+          python3 ./generate.py -f ../../rustdesk/ -o . -e "../../rustdesk/$MAIN_EXE"
           popd
           mkdir -p ./SignOutput
           mv ./target/release/rustdesk-portable-packer.exe ./SignOutput/rustdesk-${{ env.VERSION }}-${{ matrix.job.arch }}.exe
@@ -523,7 +530,11 @@ jobs:
         run: |
           git checkout -- res/msi
           cp -r ./rustdesk ./rustdesk-msi-template
-          mv ./rustdesk-msi-template/rustdesk.exe ./rustdesk-msi-template/RDAPPNAM.exe
+          if (Test-Path ./rustdesk-msi-template/rustdesk.exe) {
+            mv -Force ./rustdesk-msi-template/rustdesk.exe ./rustdesk-msi-template/RDAPPNAM.exe
+          } elseif (Test-Path ./rustdesk-msi-template/SupportViewer.exe) {
+            mv -Force ./rustdesk-msi-template/SupportViewer.exe ./rustdesk-msi-template/RDAPPNAM.exe
+          }
           Set-Content -Path ./rustdesk-msi-template/custom.txt -Value 'placeholder' -NoNewline
           $assets = './rustdesk-msi-template/data/flutter_assets/assets'
           New-Item -ItemType Directory -Force -Path $assets | Out-Null

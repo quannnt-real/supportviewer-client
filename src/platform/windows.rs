@@ -1539,15 +1539,21 @@ pub fn rename_exe_cmd(src_exe: &str, path: &str) -> ResultType<String> {
         .to_string_lossy()
         .to_string();
     let app_name = crate::get_app_name();
-    if src_exe_filename == format!("{app_name}.exe") {
-        Ok("".to_owned())
-    } else {
-        Ok(format!(
-            "
-        move /Y \"{path}\\{src_exe_filename}\" \"{path}\\{app_name}.exe\"
-        ",
-        ))
+    let mut cmds = String::new();
+    if !src_exe_filename.eq_ignore_ascii_case(&format!("{app_name}.exe")) {
+        cmds.push_str(&format!(
+            "\r\nif exist \"{path}\\{src_exe_filename}\" move /Y \"{path}\\{src_exe_filename}\" \"{path}\\{app_name}.exe\""
+        ));
     }
+    if !app_name.eq_ignore_ascii_case("rustdesk") {
+        cmds.push_str(&format!(
+            "\r\nif exist \"{path}\\rustdesk.exe\" if not exist \"{path}\\{app_name}.exe\" move /Y \"{path}\\rustdesk.exe\" \"{path}\\{app_name}.exe\""
+        ));
+        cmds.push_str(&format!(
+            "\r\nif exist \"{path}\\rustdesk.exe\" del /f /q \"{path}\\rustdesk.exe\""
+        ));
+    }
+    Ok(cmds)
 }
 
 #[inline]
@@ -1631,7 +1637,7 @@ pub fn install_me(options: &str, path: String, silent: bool, debug: bool) -> Res
     if get_windows_installer_state(&installed_subkey)? == Some(true) {
         bail!("Cannot install the EXE package over an existing MSI installation");
     }
-    let uninstall_str = get_uninstall(false, false)?;
+    let uninstall_str = get_uninstall(false, false, false)?;
     let mut path = path.trim_end_matches('\\').to_owned();
     let (subkey, _path, start_menu, exe) = get_default_install_info();
     let mut exe = exe;
@@ -1752,9 +1758,9 @@ copy /Y \"{tmp_path}\\{app_name} Tray.lnk\" \"%PROGRAMDATA%\\Microsoft\\Windows\
     let install_remote_printer = if install_printer {
         // No need to use `|| true` here.
         // The script will not exit even if `--install-remote-printer` panics.
-        format!("\"{}\" --install-remote-printer", &src_exe)
+        format!("if exist \"{}\" \"{}\" --install-remote-printer", &src_exe, &src_exe)
     } else if is_win_10_or_greater() {
-        format!("\"{}\" --uninstall-remote-printer", &src_exe)
+        format!("if exist \"{}\" \"{}\" --uninstall-remote-printer", &src_exe, &src_exe)
     } else {
         "".to_owned()
     };
@@ -1779,6 +1785,7 @@ copy /Y \"{tmp_path}\\{app_name} Tray.lnk\" \"%PROGRAMDATA%\\Microsoft\\Windows\
 chcp 65001
 md \"{path}\"
 {copy_exe}
+{rename_exe}
 reg add {subkey} /f
 reg add {subkey} /f /v DisplayIcon /t REG_SZ /d \"{display_icon}\"
 reg add {subkey} /f /v DisplayName /t REG_SZ /d \"{app_name}\"
@@ -1810,6 +1817,7 @@ copy /Y \"{tmp_path}\\Uninstall {app_name}.lnk\" \"{path}\\\"
         sleep = if debug { "timeout 300" } else { "" },
         dels = if debug { "" } else { &dels },
         copy_exe = copy_exe_cmd(&src_exe, &exe, &path)?,
+        rename_exe = rename_exe_cmd(&src_exe, &path)?,
         import_config = get_import_config(&exe),
     );
     run_cmds(
@@ -1853,9 +1861,11 @@ fn get_before_uninstall(kill_self: bool) -> ResultType<String> {
     {remove_service}
     taskkill /F /IM {broker_exe}
     taskkill /F /IM {app_name}.exe{filter}
+    taskkill /F /IM rustdesk.exe{filter}
     reg delete HKEY_CLASSES_ROOT\\.{ext} /f
     reg delete HKEY_CLASSES_ROOT\\{ext} /f
     netsh advfirewall firewall delete rule name=\"{app_name} Service\"
+    netsh advfirewall firewall delete rule name=\"RustDesk Service\"
     ",
         broker_exe = WIN_TOPMOST_INJECTED_PROCESS_EXE,
     ))
@@ -1868,12 +1878,9 @@ fn get_before_uninstall(kill_self: bool) -> ResultType<String> {
 ///   the current process as well. If `false`, it will exclude the current process from the kill
 ///   command.
 /// - `uninstall_printer`: If `true`, includes commands to uninstall the remote printer.
-///
-/// # Details
-/// The `uninstall_printer` parameter determines whether the command to uninstall the remote printer
-/// is included in the generated uninstall script. If `uninstall_printer` is `false`, the printer
-/// related command is omitted from the script.
-fn get_uninstall(kill_self: bool, uninstall_printer: bool) -> ResultType<String> {
+/// - `remove_install_dir`: If `true`, removes the installation directory (`path`). Should be `false`
+///   during fresh installations or upgrades to prevent self-deletion if running from that directory.
+fn get_uninstall(kill_self: bool, uninstall_printer: bool, remove_install_dir: bool) -> ResultType<String> {
     let (subkey, path, start_menu, _) = get_install_info();
     let installer_state = get_windows_installer_state(&subkey)?;
     if let Some(product_code) = get_msi_product_code(&subkey, installer_state)? {
@@ -1883,13 +1890,29 @@ fn get_uninstall(kill_self: bool, uninstall_printer: bool) -> ResultType<String>
         bail!("MSI product code was not found in {subkey}");
     }
 
+    let is_running_from_target = if let Ok(current_exe) = std::env::current_exe() {
+        if let Some(parent) = current_exe.parent() {
+            parent.to_string_lossy().trim_end_matches('\\').eq_ignore_ascii_case(path.trim_end_matches('\\'))
+        } else {
+            false
+        }
+    } else {
+        false
+    };
+
+    let rd_dir_cmd = if remove_install_dir && !is_running_from_target {
+        format!("if exist \"{path}\" rd /s /q \"{path}\"")
+    } else {
+        "".to_string()
+    };
+
     let mut uninstall_cert_cmd = "".to_string();
     let mut uninstall_printer_cmd = "".to_string();
     if let Ok(exe) = std::env::current_exe() {
         if let Some(exe_path) = exe.to_str() {
-            uninstall_cert_cmd = format!("\"{}\" --uninstall-cert", exe_path);
+            uninstall_cert_cmd = format!("if exist \"{}\" \"{}\" --uninstall-cert", exe_path, exe_path);
             if uninstall_printer {
-                uninstall_printer_cmd = format!("\"{}\" --uninstall-remote-printer", &exe_path);
+                uninstall_printer_cmd = format!("if exist \"{}\" \"{}\" --uninstall-remote-printer", &exe_path, &exe_path);
             }
         }
     }
@@ -1900,7 +1923,7 @@ fn get_uninstall(kill_self: bool, uninstall_printer: bool) -> ResultType<String>
     {uninstall_cert_cmd}
     reg delete {subkey} /f
     {uninstall_amyuni_idd}
-    if exist \"{path}\" rd /s /q \"{path}\"
+    {rd_dir_cmd}
     if exist \"{start_menu}\" rd /s /q \"{start_menu}\"
     if exist \"%PUBLIC%\\Desktop\\{app_name}.lnk\" del /f /q \"%PUBLIC%\\Desktop\\{app_name}.lnk\"
     if exist \"%PROGRAMDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\{app_name} Tray.lnk\" del /f /q \"%PROGRAMDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\{app_name} Tray.lnk\"
@@ -1919,7 +1942,7 @@ pub fn uninstall_me(kill_self: bool) -> ResultType<()> {
             .build()?
             .block_on(crate::trusted_devices::config::refresh_from_server())?;
     }
-    run_cmds(get_uninstall(kill_self, true)?, true, "uninstall")
+    run_cmds(get_uninstall(kill_self, true, true)?, true, "uninstall")
 }
 
 fn write_vbs(cmds: String, tip: &str) -> ResultType<PathBuf> {
@@ -1984,8 +2007,12 @@ pub fn add_recent_document(path: &str) {
 }
 
 pub fn is_installed() -> bool {
-    let (_, _, _, exe) = get_install_info();
-    std::fs::metadata(exe).is_ok()
+    let (_, path, _, exe) = get_install_info();
+    if std::fs::metadata(&exe).is_ok() {
+        return true;
+    }
+    let fallback_exe = PathBuf::from(&path).join("rustdesk.exe");
+    std::fs::metadata(&fallback_exe).is_ok()
 }
 
 pub fn get_reg(name: &str) -> String {
@@ -4044,8 +4071,14 @@ fn service_control_command(operation: &str, exe: &str, installed_now: bool) -> R
         String::new()
     };
     Ok(format!(
-        "start \"\" /b /wait \"{exe}\" --service-control {operation} \"{app_name}\"{executable_argument}\r\n\
-         if not \"%errorlevel%\"==\"0\" exit /b %errorlevel%"
+        "if exist \"{exe}\" (\r\n\
+             start \"\" /b /wait \"{exe}\" --service-control {operation} \"{app_name}\"{executable_argument}\r\n\
+             if not \"%errorlevel%\"==\"0\" (\r\n\
+                 {legacy}\r\n\
+             )\r\n\
+         ) else (\r\n\
+             {legacy}\r\n\
+         )"
     ))
 }
 
@@ -4286,7 +4319,14 @@ impl Drop for WallPaperRemover {
 
 fn get_uninstall_amyuni_idd() -> String {
     match std::env::current_exe() {
-        Ok(path) => format!("\"{}\" --uninstall-amyuni-idd", path.to_str().unwrap_or("")),
+        Ok(path) => {
+            let p = path.to_str().unwrap_or("");
+            if p.is_empty() {
+                "".to_string()
+            } else {
+                format!("if exist \"{p}\" \"{p}\" --uninstall-amyuni-idd")
+            }
+        }
         Err(e) => {
             log::warn!("Failed to get current exe path, cannot get command of uninstalling idd, Zzerror: {:?}", e);
             "".to_string()

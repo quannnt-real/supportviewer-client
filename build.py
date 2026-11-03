@@ -978,12 +978,18 @@ def build_flutter_windows(version, features, skip_portable_pack):
     os.chdir('..')
     shutil.copy2('target/release/deps/dylib_virtual_display.dll',
                  flutter_build_dir_2)
+    # Ensure both SupportViewer.exe and rustdesk.exe exist for packaging and tools
+    if os.path.exists(f'{flutter_build_dir_2}/SupportViewer.exe') and not os.path.exists(f'{flutter_build_dir_2}/rustdesk.exe'):
+        shutil.copy2(f'{flutter_build_dir_2}/SupportViewer.exe', f'{flutter_build_dir_2}/rustdesk.exe')
+    elif os.path.exists(f'{flutter_build_dir_2}/rustdesk.exe') and not os.path.exists(f'{flutter_build_dir_2}/SupportViewer.exe'):
+        shutil.copy2(f'{flutter_build_dir_2}/rustdesk.exe', f'{flutter_build_dir_2}/SupportViewer.exe')
     if skip_portable_pack:
         return
+    main_exe = 'SupportViewer.exe' if os.path.exists(f'{flutter_build_dir_2}/SupportViewer.exe') else 'rustdesk.exe'
     os.chdir('libs/portable')
     system2('pip3 install -r requirements.txt')
     system2(
-        f'python3 ./generate.py -f ../../{flutter_build_dir_2} -o . -e ../../{flutter_build_dir_2}/rustdesk.exe')
+        f'python3 ./generate.py -f ../../{flutter_build_dir_2} -o . -e ../../{flutter_build_dir_2}/{main_exe}')
     os.chdir('../..')
     if os.path.exists('./rustdesk_portable.exe'):
         os.replace('./target/release/rustdesk-portable-packer.exe',
