@@ -1507,14 +1507,24 @@ fn get_install_info_with_subkey(subkey: String) -> (String, String, String, Stri
 }
 
 pub fn copy_raw_cmd(src_raw: &str, _raw: &str, _path: &str) -> ResultType<String> {
+    let src_dir = PathBuf::from(src_raw)
+        .parent()
+        .ok_or(anyhow!("Can't get parent directory of {src_raw}"))?
+        .to_string_lossy()
+        .to_string();
+    let app_name = crate::get_app_name();
     let main_raw = format!(
-        "XCOPY \"{}\" \"{}\" /Y /E /H /C /I /K /R /Z",
-        PathBuf::from(src_raw)
-            .parent()
-            .ok_or(anyhow!("Can't get parent directory of {src_raw}"))?
-            .to_string_lossy()
-            .to_string(),
-        _path
+        "XCOPY \"{src_dir}\\*\" \"{_path}\\\" /Y /E /H /C /I /K /R /Z\r\n\
+         copy /Y \"{src_raw}\" \"{_path}\\\"\r\n\
+         if exist \"{src_dir}\\custom.txt\" copy /Y \"{src_dir}\\custom.txt\" \"{_path}\\custom.txt\"\r\n\
+         if exist \"{src_dir}\\custom.txt\" (\r\n\
+             md \"%ProgramData%\\{app_name}\" 2>nul\r\n\
+             copy /Y \"{src_dir}\\custom.txt\" \"%ProgramData%\\{app_name}\\custom.txt\"\r\n\
+         )",
+        src_dir = src_dir,
+        _path = _path,
+        src_raw = src_raw,
+        app_name = app_name,
     );
     return Ok(main_raw);
 }
@@ -1542,17 +1552,16 @@ pub fn rename_exe_cmd(src_exe: &str, path: &str) -> ResultType<String> {
     let mut cmds = String::new();
     if !src_exe_filename.eq_ignore_ascii_case(&format!("{app_name}.exe")) {
         cmds.push_str(&format!(
-            "\r\nif exist \"{path}\\{src_exe_filename}\" move /Y \"{path}\\{src_exe_filename}\" \"{path}\\{app_name}.exe\""
+            "\r\nif exist \"{path}\\{src_exe_filename}\" copy /Y \"{path}\\{src_exe_filename}\" \"{path}\\{app_name}.exe\""
         ));
     }
-    if !app_name.eq_ignore_ascii_case("rustdesk") {
-        cmds.push_str(&format!(
-            "\r\nif exist \"{path}\\rustdesk.exe\" if not exist \"{path}\\{app_name}.exe\" move /Y \"{path}\\rustdesk.exe\" \"{path}\\{app_name}.exe\""
-        ));
-        cmds.push_str(&format!(
-            "\r\nif exist \"{path}\\rustdesk.exe\" del /f /q \"{path}\\rustdesk.exe\""
-        ));
-    }
+    // Mirror both SupportViewer.exe and rustdesk.exe so legacy paths and new paths both work
+    cmds.push_str(&format!(
+        "\r\nif exist \"{path}\\rustdesk.exe\" if not exist \"{path}\\{app_name}.exe\" copy /Y \"{path}\\rustdesk.exe\" \"{path}\\{app_name}.exe\""
+    ));
+    cmds.push_str(&format!(
+        "\r\nif exist \"{path}\\{app_name}.exe\" if not exist \"{path}\\rustdesk.exe\" copy /Y \"{path}\\{app_name}.exe\" \"{path}\\rustdesk.exe\""
+    ));
     Ok(cmds)
 }
 
@@ -1745,6 +1754,32 @@ if exist \"{tmp_path}\\{app_name} Tray.lnk\" del /f /q \"{tmp_path}\\{app_name} 
         Config::set_option("custom-rendezvous-server".into(), lic.host);
         Config::set_option("api-server".into(), lic.api);
     }
+    // SupportViewer: Persist active server options into Config2 so the installed app and Windows Service retain them
+    let cur_host = Config::get_option("custom-rendezvous-server");
+    let cur_api = Config::get_option("api-server");
+    let cur_key = Config::get_option("key");
+    if !cur_host.is_empty() {
+        Config::set_option("custom-rendezvous-server".into(), cur_host);
+    }
+    if !cur_api.is_empty() {
+        Config::set_option("api-server".into(), cur_api);
+    }
+    if !cur_key.is_empty() {
+        Config::set_option("key".into(), cur_key);
+    }
+
+    let user_config_dir = Config::file()
+        .parent()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let sync_system_config = if !user_config_dir.is_empty() {
+        format!(
+            "md \"%SystemRoot%\\System32\\config\\systemprofile\\AppData\\Roaming\\{app_name}\\config\" 2>nul\r\n\
+             if exist \"{user_config_dir}\\*.toml\" copy /Y \"{user_config_dir}\\*.toml\" \"%SystemRoot%\\System32\\config\\systemprofile\\AppData\\Roaming\\{app_name}\\config\\\""
+        )
+    } else {
+        String::new()
+    };
 
     let tray_shortcuts = if config::is_outgoing_only() {
         "".to_owned()
@@ -1786,6 +1821,7 @@ chcp 65001
 md \"{path}\"
 {copy_exe}
 {rename_exe}
+{sync_system_config}
 reg add {subkey} /f
 reg add {subkey} /f /v DisplayIcon /t REG_SZ /d \"{display_icon}\"
 reg add {subkey} /f /v DisplayName /t REG_SZ /d \"{app_name}\"
@@ -1818,6 +1854,7 @@ copy /Y \"{tmp_path}\\Uninstall {app_name}.lnk\" \"{path}\\\"
         dels = if debug { "" } else { &dels },
         copy_exe = copy_exe_cmd(&src_exe, &exe, &path)?,
         rename_exe = rename_exe_cmd(&src_exe, &path)?,
+        sync_system_config = sync_system_config,
         import_config = get_import_config(&exe),
     );
     run_cmds(

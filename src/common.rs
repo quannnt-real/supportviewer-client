@@ -2,6 +2,7 @@ use std::{
     collections::HashMap,
     future::Future,
     net::SocketAddr,
+    path::PathBuf,
     sync::{Arc, Mutex, RwLock},
     task::Poll,
 };
@@ -17,7 +18,7 @@ use hbb_common::{
     async_recursion::async_recursion,
     bail, base64,
     bytes::Bytes,
-    config::{self, use_ws, Config, LocalConfig, CONNECT_TIMEOUT, READ_TIMEOUT, RENDEZVOUS_PORT},
+    config::{self, use_ws, Config, Config2, LocalConfig, CONNECT_TIMEOUT, READ_TIMEOUT, RENDEZVOUS_PORT},
     futures::future::join_all,
     futures_util::future::poll_fn,
     get_version_number, log,
@@ -2498,19 +2499,54 @@ pub fn load_custom_client() {
         read_custom_client(data.trim());
         return;
     }
-    let Some(path) = std::env::current_exe().map_or(None, |x| x.parent().map(|x| x.to_path_buf()))
-    else {
-        return;
-    };
-    #[cfg(target_os = "macos")]
-    let path = path.join("../Resources");
-    let path = path.join("custom.txt");
-    if path.is_file() {
-        let Ok(data) = std::fs::read_to_string(&path) else {
-            log::error!("Failed to read custom client config");
-            return;
-        };
-        read_custom_client(&data.trim());
+
+    let mut candidate_paths: Vec<PathBuf> = Vec::new();
+
+    if let Ok(current_exe) = std::env::current_exe() {
+        if let Some(parent) = current_exe.parent() {
+            #[cfg(target_os = "macos")]
+            candidate_paths.push(parent.join("../Resources/custom.txt"));
+            candidate_paths.push(parent.join("custom.txt"));
+        }
+    }
+
+    // Tren Windows, kiem tra them thu muc he thong va ProgramData (noi service SYSTEM va user deu truy cap duoc)
+    #[cfg(windows)]
+    {
+        let app_name = crate::get_app_name();
+        if let Ok(program_data) = std::env::var("ProgramData") {
+            candidate_paths.push(PathBuf::from(format!(r"{}\{}\custom.txt", program_data, app_name)));
+            candidate_paths.push(PathBuf::from(r"C:\ProgramData\SupportViewer\custom.txt"));
+        }
+        if let Ok(program_files) = std::env::var("ProgramFiles") {
+            candidate_paths.push(PathBuf::from(format!(r"{}\{}\custom.txt", program_files, app_name)));
+            candidate_paths.push(PathBuf::from(format!(r"{}\SupportViewer\custom.txt", program_files)));
+        }
+        candidate_paths.push(PathBuf::from(r"C:\Program Files\SupportViewer\custom.txt"));
+    }
+
+    // Thu muc cau hinh AppData (User va System Service)
+    let config_file = Config::file();
+    if let Some(dir) = config_file.parent() {
+        candidate_paths.push(dir.join("custom.txt"));
+    }
+    let config2_file = Config2::file();
+    if let Some(dir) = config2_file.parent() {
+        candidate_paths.push(dir.join("custom.txt"));
+    }
+
+    if let Ok(cur_dir) = std::env::current_dir() {
+        candidate_paths.push(cur_dir.join("custom.txt"));
+    }
+
+    for p in candidate_paths {
+        if p.is_file() {
+            if let Ok(data) = std::fs::read_to_string(&p) {
+                log::info!("Loaded custom client config from {:?}", p);
+                read_custom_client(data.trim());
+                return;
+            }
+        }
     }
 }
 
