@@ -43,7 +43,7 @@ fn make_tray() -> hbb_common::ResultType<()> {
     let icon;
     #[cfg(target_os = "macos")]
     {
-        icon = include_bytes!("../res/mac-tray-dark-x2.png"); // use as template, so color is not important
+        icon = include_bytes!("../res/mac-tray-dark-x2.png");
     }
     #[cfg(not(target_os = "macos"))]
     {
@@ -51,11 +51,15 @@ fn make_tray() -> hbb_common::ResultType<()> {
     }
 
     let (icon_rgba, icon_width, icon_height) = {
-        let image = load_icon_from_asset()
-            .unwrap_or(image::load_from_memory(icon).context("Failed to open icon path")?)
-            .into_rgba8();
-        let (width, height) = image.dimensions();
-        let rgba = image.into_raw();
+        let mut image = load_icon_from_asset()
+            .unwrap_or(image::load_from_memory(icon).context("Failed to open icon path")?);
+        let (w, h) = (image.width(), image.height());
+        if w > 64 || h > 64 {
+            image = image.resize(64, 64, image::imageops::FilterType::Lanczos3);
+        }
+        let rgba_img = image.into_rgba8();
+        let (width, height) = rgba_img.dimensions();
+        let rgba = rgba_img.into_raw();
         (rgba, width, height)
     };
     let icon = tray_icon::Icon::from_rgba(icon_rgba, icon_width, icon_height)
@@ -160,7 +164,7 @@ fn make_tray() -> hbb_common::ResultType<()> {
                 .with_icon(icon.clone());
             #[cfg(target_os = "macos")]
             {
-                builder = builder.with_icon_as_template(true);
+                builder = builder.with_icon_as_template(false);
             }
             #[cfg(target_os = "windows")]
             {

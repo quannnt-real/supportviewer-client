@@ -97,24 +97,31 @@ impl PasteObserver {
         thread::spawn(move || loop {
             match rx_observer.recv_timeout(Duration::from_millis(300)) {
                 Ok(event) => {
-                    if (event.flag & StreamFlags::ITEM_CREATED) != StreamFlags::NONE
+                    if (event.flag
+                        & (StreamFlags::ITEM_CREATED
+                            | StreamFlags::ITEM_RENAMED
+                            | StreamFlags::ITEM_MODIFIED))
+                        != StreamFlags::NONE
                         && (event.flag & StreamFlags::ITEM_REMOVED) == StreamFlags::NONE
                         && (event.flag & StreamFlags::IS_FILE) != StreamFlags::NONE
                     {
-                        let source_file = observer_info
-                            .lock()
-                            .unwrap()
-                            .as_ref()
-                            .map(|x| Self::get_file_from_path(&x.source_path));
-                        if let Some(source_file) = source_file {
-                            let file = Self::get_file_from_path(&event.path);
-                            if source_file == file {
-                                if let Some(observer_info) = observer_info.lock().unwrap().as_mut()
-                                {
-                                    observer_info.target_path = event.path.clone();
-                                    cb_pasted(observer_info);
-                                }
+                        let matched_info = {
+                            let mut guard = observer_info.lock().unwrap();
+                            let is_match = guard.as_ref().map_or(false, |x| {
+                                !x.source_path.is_empty()
+                                    && event.path != x.source_path
+                                    && Self::get_file_from_path(&x.source_path)
+                                        == Self::get_file_from_path(&event.path)
+                            });
+                            if is_match {
+                                guard.take()
+                            } else {
+                                None
                             }
+                        };
+                        if let Some(mut info) = matched_info {
+                            info.target_path = event.path.clone();
+                            cb_pasted(&info);
                         }
                     }
                 }
@@ -127,8 +134,36 @@ impl PasteObserver {
         })
     }
 
+    fn collect_observe_dirs(home_dir: &str) -> Vec<String> {
+        let mut dirs = vec![home_dir.to_string()];
+        let volumes = std::path::Path::new("/Volumes");
+        if volumes.is_dir() {
+            if let Ok(entries) = std::fs::read_dir(volumes) {
+                for entry in entries.flatten() {
+                    if let Ok(ft) = entry.file_type() {
+                        // Skip symlinks (e.g. "/Volumes/Macintosh HD -> /") so we only watch
+                        // secondary/external volumes rather than the entire root filesystem.
+                        if ft.is_dir() && !ft.is_symlink() {
+                            let vol_path = entry.path().to_string_lossy().to_string();
+                            if !dirs.contains(&vol_path) {
+                                dirs.push(vol_path);
+                            }
+                        }
+                    }
+                }
+            }
+            let volumes_root = "/Volumes".to_string();
+            if !dirs.contains(&volumes_root) {
+                dirs.push(volumes_root);
+            }
+        }
+        dirs
+    }
+
     fn new_fsevent(home_dir: String, tx_observer: Sender<fsevent::Event>) -> fsevent::FsEvent {
-        let mut evt = fsevent::FsEvent::new(vec![home_dir.to_string()]);
+        let dirs = Self::collect_observe_dirs(&home_dir);
+        log::debug!("fsevent observe dirs: {:?}", &dirs);
+        let mut evt = fsevent::FsEvent::new(dirs);
         evt.observe_async(tx_observer).ok();
         evt
     }
@@ -138,7 +173,7 @@ impl PasteObserver {
         tx_observer: Sender<fsevent::Event>,
         rx_control: Receiver<FseventControl>,
     ) -> thread::JoinHandle<()> {
-        log::debug!("fsevent observe dir: {}", &home_dir);
+        log::debug!("fsevent home dir: {}", &home_dir);
         thread::spawn(move || {
             let mut fsevent = None;
             loop {
@@ -163,6 +198,12 @@ impl PasteObserver {
         })
     }
 
+    pub fn prewarm(&self) {
+        if let Some(tx_handle_fsevent_thread) = self.tx_handle_fsevent_thread.as_ref() {
+            tx_handle_fsevent_thread.tx.send(FseventControl::Start).ok();
+        }
+    }
+
     pub fn start(&mut self, observer_info: PasteObserverInfo) {
         if let Some(tx_handle_fsevent_thread) = self.tx_handle_fsevent_thread.as_ref() {
             self.observer_info.lock().unwrap().replace(observer_info);
@@ -174,6 +215,28 @@ impl PasteObserver {
         if let Some(tx_handle_fsevent_thread) = &self.tx_handle_fsevent_thread {
             self.observer_info = Default::default();
             tx_handle_fsevent_thread.tx.send(FseventControl::Stop).ok();
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn collect_observe_dirs_includes_home_and_mounted_volumes_without_symlinks() {
+        let dirs = PasteObserver::collect_observe_dirs("/Users/testuser");
+        assert_eq!(dirs.first().map(String::as_str), Some("/Users/testuser"));
+        if std::path::Path::new("/Volumes").is_dir() {
+            assert!(dirs.iter().any(|d| d == "/Volumes"));
+            for d in &dirs {
+                if let Some(rest) = d.strip_prefix("/Volumes/") {
+                    if !rest.is_empty() {
+                        let meta = std::fs::symlink_metadata(d).unwrap();
+                        assert!(!meta.file_type().is_symlink(), "symlink leaked: {d}");
+                    }
+                }
+            }
         }
     }
 }

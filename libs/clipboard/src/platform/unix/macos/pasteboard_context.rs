@@ -303,6 +303,7 @@ impl PasteboardContext {
                 });
             }
         }
+        self.observer.lock().unwrap().prewarm();
         Ok(())
     }
 
