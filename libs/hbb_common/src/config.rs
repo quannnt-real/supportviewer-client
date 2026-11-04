@@ -66,13 +66,18 @@ lazy_static::lazy_static! {
     static ref LOCAL_CONFIG: RwLock<LocalConfig> = RwLock::new(LocalConfig::load());
     static ref STATUS: RwLock<Status> = RwLock::new(Status::load());
     static ref ONLINE: Mutex<HashMap<String, i64>> = Default::default();
-    pub static ref PROD_RENDEZVOUS_SERVER: RwLock<String> = RwLock::new("".to_owned());
+    pub static ref PROD_RENDEZVOUS_SERVER: RwLock<String> = RwLock::new("rustdesk.ktgotay.com".to_owned());
     pub static ref EXE_RENDEZVOUS_SERVER: RwLock<String> = Default::default();
     pub static ref APP_NAME: RwLock<String> = RwLock::new("SupportViewer".to_owned());
     static ref KEY_PAIR: Mutex<Option<KeyPair>> = Default::default();
     static ref USER_DEFAULT_CONFIG: RwLock<(UserDefaultConfig, Instant)> = RwLock::new((UserDefaultConfig::load(), Instant::now()));
     pub static ref NEW_STORED_PEER_CONFIG: Mutex<HashSet<String>> = Default::default();
-    pub static ref DEFAULT_SETTINGS: RwLock<HashMap<String, String>> = Default::default();
+    pub static ref DEFAULT_SETTINGS: RwLock<HashMap<String, String>> = RwLock::new(HashMap::from([
+        ("custom-rendezvous-server".to_string(), "rustdesk.ktgotay.com".to_string()),
+        ("relay-server".to_string(), "rustdesk.ktgotay.com:21117".to_string()),
+        ("api-server".to_string(), "https://rustdesk.ktgotay.com".to_string()),
+        ("key".to_string(), "5KiZiF8etBEbDKysnUx2+plRl1zKUKfvicyoarbe4fU=".to_string()),
+    ]));
     pub static ref OVERWRITE_SETTINGS: RwLock<HashMap<String, String>> = Default::default();
     pub static ref DEFAULT_DISPLAY_SETTINGS: RwLock<HashMap<String, String>> = Default::default();
     pub static ref OVERWRITE_DISPLAY_SETTINGS: RwLock<HashMap<String, String>> = Default::default();
@@ -113,8 +118,8 @@ const CHARS: &[char] = &[
     'm', 'n', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z',
 ];
 
-pub const RENDEZVOUS_SERVERS: &[&str] = &[];
-pub const RS_PUB_KEY: &str = "";
+pub const RENDEZVOUS_SERVERS: &[&str] = &["rustdesk.ktgotay.com"];
+pub const RS_PUB_KEY: &str = "5KiZiF8etBEbDKysnUx2+plRl1zKUKfvicyoarbe4fU=";
 
 pub const RENDEZVOUS_PORT: i32 = 21116;
 pub const RELAY_PORT: i32 = 21117;

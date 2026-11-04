@@ -1283,6 +1283,9 @@ fn get_api_server_(api: String, custom: String) -> String {
     }
     let s0 = get_custom_rendezvous_server(custom);
     if !s0.is_empty() {
+        if s0 == "rustdesk.ktgotay.com" {
+            return "https://rustdesk.ktgotay.com".to_owned();
+        }
         let s = crate::increase_port(&s0, -2);
         if s == s0 {
             let s = if hbb_common::is_ipv6_str(&s) && !s.starts_with('[') {
@@ -1295,7 +1298,7 @@ fn get_api_server_(api: String, custom: String) -> String {
             return format!("http://{}", s);
         }
     }
-    "".to_owned()
+    "https://rustdesk.ktgotay.com".to_owned()
 }
 
 #[inline]
