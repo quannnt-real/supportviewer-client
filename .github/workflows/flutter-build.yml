@@ -601,7 +601,6 @@ jobs:
           files: |
             ./SignOutput/supportviewer-*.msi
             ./SignOutput/supportviewer-*.exe
-            ./sv-out/supportviewer-*.zip
 
   # The fallback for the flutter version, we use Sciter for 32bit Windows.
   build-for-windows-sciter:
@@ -1241,7 +1240,6 @@ jobs:
           files: |
             supportviewer*-${{ matrix.job.arch }}.dmg
             supportviewer*-${{ matrix.job.arch }}.pkg
-            supportviewer-*-macos-${{ matrix.job.arch }}-app.zip
 
   publish-signed-update-metadata:
     needs: [build-for-windows-flutter, build-for-macOS]
