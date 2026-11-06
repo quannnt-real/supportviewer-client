@@ -1297,9 +1297,6 @@ jobs:
             --metadata-out ./supportviewer-update.json \
             --signature-out ./supportviewer-update.json.sig
 
-          cp ./supportviewer-update.json ./rustdesk-update.json
-          cp ./supportviewer-update.json.sig ./rustdesk-update.json.sig
-
       - name: Verify update metadata
         env:
           RUSTDESK_UPDATE_ED25519_PUBLIC_KEY: ${{ vars.RUSTDESK_UPDATE_ED25519_PUBLIC_KEY }}
@@ -1326,8 +1323,6 @@ jobs:
           files: |
             ./supportviewer-update.json
             ./supportviewer-update.json.sig
-            ./rustdesk-update.json
-            ./rustdesk-update.json.sig
 
   publish_unsigned:
     needs:
