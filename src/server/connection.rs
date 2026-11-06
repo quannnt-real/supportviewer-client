@@ -1871,7 +1871,7 @@ impl Connection {
                 let code = totp.generate_current();
                 if let Ok(code) = code {
                     let text = format!(
-                        "2FA code: {}\n\nA new connection has been established to your device with ID {}. The source IP address is {}.",
+                        "Mã xác thực 2FA: {}\n\nMột kết nối mới vừa được thiết lập đến thiết bị của bạn (ID: {}).\nĐịa chỉ IP nguồn: {}.",
                         code,
                         Config::get_id(),
                         self.ip,
