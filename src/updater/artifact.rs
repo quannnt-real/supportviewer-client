@@ -106,12 +106,26 @@ pub(super) fn verified_update_artifact_from_release_page_url(
 ) -> ResultType<VerifiedUpdateArtifact> {
     let release_id = release_id_from_update_url(update_url)?;
     let display_version = display_version_from_release_id(&release_id)?;
-    let expected_artifact_url_prefix =
-        format!("https://github.com/rustdesk/rustdesk/releases/download/{release_id}/");
-    let metadata_url = format!("{expected_artifact_url_prefix}rustdesk-update.json");
+    let expected_artifact_url_prefix = if update_url.contains("/quannnt-real/supportviewer-client/") {
+        format!("https://github.com/quannnt-real/supportviewer-client/releases/download/{release_id}/")
+    } else {
+        format!("https://github.com/rustdesk/rustdesk/releases/download/{release_id}/")
+    };
+    let metadata_url = format!("{expected_artifact_url_prefix}supportviewer-update.json");
     let signature_url = format!("{metadata_url}.sig");
-    let metadata_bytes = fetch_update_sidecar_bytes(&metadata_url)?;
-    let signature_bytes = fetch_update_sidecar_bytes(&signature_url)?;
+    let (metadata_bytes, signature_bytes) = match fetch_update_sidecar_bytes(&metadata_url) {
+        Ok(m) => {
+            let s = fetch_update_sidecar_bytes(&signature_url)?;
+            (m, s)
+        }
+        Err(_) => {
+            let legacy_metadata_url = format!("{expected_artifact_url_prefix}rustdesk-update.json");
+            let legacy_signature_url = format!("{legacy_metadata_url}.sig");
+            let m = fetch_update_sidecar_bytes(&legacy_metadata_url)?;
+            let s = fetch_update_sidecar_bytes(&legacy_signature_url)?;
+            (m, s)
+        }
+    };
     let requirements = UpdateMetadataRequirements {
         expected_version: display_version.as_str(),
         expected_release_id: release_id.as_str(),
@@ -177,8 +191,9 @@ pub fn get_update_download_file_from_url(url: &str) -> Option<PathBuf> {
     let tag = segments.next()?;
     let filename = segments.next()?;
 
-    if owner != "rustdesk"
-        || repo != "rustdesk"
+    let is_supportviewer = owner == "quannnt-real" && repo == "supportviewer-client";
+    let is_rustdesk = owner == "rustdesk" && repo == "rustdesk";
+    if (!is_supportviewer && !is_rustdesk)
         || releases != "releases"
         || download != "download"
         || tag.is_empty()

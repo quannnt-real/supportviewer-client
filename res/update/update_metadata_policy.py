@@ -21,7 +21,7 @@ def validate_release(release_id, version):
         )
     ):
         raise ValueError(f"invalid release id: {release_id}")
-    match = re.fullmatch(r"v?([0-9]+)\.([0-9]+)\.([0-9]+)", release_id)
+    match = re.fullmatch(r"(?:sv-|v)?([0-9]+)\.([0-9]+)\.([0-9]+)", release_id)
     if not match:
         return
     segments = [int(part) for part in match.groups()]

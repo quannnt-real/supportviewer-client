@@ -21,7 +21,7 @@ from update_metadata_policy import (
     validate_release_base_url,
 )
 
-APP_NAME = "rustdesk"
+APP_NAME = "supportviewer"
 SCHEMA_VERSION = 1
 SIGNATURE_ALGORITHM = "ed25519"
 SIGNATURE_CONTEXT = b"RustDesk update metadata v1\n"

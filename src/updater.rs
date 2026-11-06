@@ -519,7 +519,7 @@ pub fn check_update_as_root() -> ResultType<bool> {
         log::info!("[root-update] Auto update is disabled, skipping.");
         return Ok(false);
     }
-    if crate::is_custom_client() {
+    if crate::is_custom_client() && crate::get_app_name() != "SupportViewer" {
         log::info!("[root-update] Custom client detected, skipping stock update.");
         return Ok(false);
     }

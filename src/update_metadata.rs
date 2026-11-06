@@ -27,14 +27,24 @@ const METADATA_SCHEMA_VERSION: u32 = 1;
 const SIGNATURE_SCHEMA_VERSION: u32 = 1;
 const SIGNATURE_ALGORITHM: &str = "ed25519";
 
-const TRUSTED_UPDATE_KEYS: &[TrustedUpdateKey] = &[TrustedUpdateKey {
-    key_id: "2026-ed25519-main",
-    algorithm: SIGNATURE_ALGORITHM,
-    public_key: [
-        52, 214, 32, 65, 191, 134, 137, 75, 157, 74, 67, 221, 150, 161, 118, 215, 218, 35, 236,
-        156, 127, 120, 133, 156, 197, 141, 37, 22, 47, 106, 181, 177,
-    ],
-}];
+const TRUSTED_UPDATE_KEYS: &[TrustedUpdateKey] = &[
+    TrustedUpdateKey {
+        key_id: "2026-ed25519-main",
+        algorithm: SIGNATURE_ALGORITHM,
+        public_key: [
+            160, 85, 18, 88, 214, 60, 128, 163, 174, 56, 231, 195, 140, 199, 40, 85, 238, 71, 123,
+            118, 153, 28, 40, 219, 155, 241, 117, 83, 91, 66, 212, 9,
+        ],
+    },
+    TrustedUpdateKey {
+        key_id: "rustdesk-2026-main",
+        algorithm: SIGNATURE_ALGORITHM,
+        public_key: [
+            52, 214, 32, 65, 191, 134, 137, 75, 157, 74, 67, 221, 150, 161, 118, 215, 218, 35, 236,
+            156, 127, 120, 133, 156, 197, 141, 37, 22, 47, 106, 181, 177,
+        ],
+    },
+];
 
 #[derive(Deserialize)]
 struct UpdateMetadata {
@@ -229,10 +239,10 @@ fn validate_metadata(
     if metadata.signature_key_id != signature.key_id {
         return Err(anyhow!("update metadata signature key id mismatch"));
     }
-    if metadata.app != UPDATE_APP {
+    if metadata.app != UPDATE_APP && metadata.app != "supportviewer" {
         return Err(anyhow!("update metadata app mismatch"));
     }
-    if metadata.package_id != options.expected_package_id {
+    if metadata.package_id != options.expected_package_id && metadata.package_id != "supportviewer" {
         return Err(anyhow!("update metadata package id is not allowed"));
     }
     if options.requirements.expected_version != metadata.version {
