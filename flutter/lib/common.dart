@@ -3084,6 +3084,21 @@ Future<bool> osxRequestAudio() async {
   return await kMacOSPermChannel.invokeMethod("requestRecordAudio");
 }
 
+Future<PermissionAuthorizeType> osxCanRecordVideo() async {
+  int res = await kMacOSPermChannel.invokeMethod("canRecordVideo");
+  if (res > 0) {
+    return PermissionAuthorizeType.authorized;
+  } else if (res == 0) {
+    return PermissionAuthorizeType.undetermined;
+  } else {
+    return PermissionAuthorizeType.denied;
+  }
+}
+
+Future<bool> osxRequestVideo() async {
+  return await kMacOSPermChannel.invokeMethod("requestRecordVideo");
+}
+
 Widget futureBuilder(
     {required Future? future, required Widget Function(dynamic data) hasData}) {
   return FutureBuilder(

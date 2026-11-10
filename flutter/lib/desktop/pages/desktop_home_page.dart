@@ -47,6 +47,8 @@ class _DesktopHomePageState extends State<DesktopHomePage>
   var watchIsProcessTrust = false;
   var watchIsInputMonitoring = false;
   var watchIsCanRecordAudio = false;
+  var watchIsCanRecordVideo = false;
+  var canRecordVideo = PermissionAuthorizeType.authorized;
   Timer? _updateTimer;
   bool isCardClosed = false;
 
@@ -505,6 +507,20 @@ class _DesktopHomePageState extends State<DesktopHomePage>
         return buildInstallCard("", "install_daemon_tip", "Install", () async {
           bind.mainIsInstalledDaemon(prompt: true);
         });
+      } else if (!isOutgoingOnly &&
+          canRecordVideo != PermissionAuthorizeType.authorized) {
+        return buildInstallCard(
+            "Permissions", "Grant camera permission", "Configure", () async {
+          final prev = canRecordVideo;
+          await osxRequestVideo();
+          canRecordVideo = await osxCanRecordVideo();
+          if (prev == PermissionAuthorizeType.denied) {
+            launchUrl(Uri.parse(
+                'x-apple.systempreferences:com.apple.preference.security?Privacy_Camera'));
+          }
+          watchIsCanRecordVideo = true;
+          setState(() {});
+        }, help: 'Help', link: translate("doc_mac_permission"));
       }
       //// Disable microphone configuration for macOS. We will request the permission when needed.
       // else if ((await osxCanRecordAudio() !=
@@ -699,6 +715,16 @@ class _DesktopHomePageState extends State<DesktopHomePage>
   @override
   void initState() {
     super.initState();
+    if (isMacOS) {
+      Future.microtask(() async {
+        final status = await osxCanRecordVideo();
+        if (status != canRecordVideo && mounted) {
+          setState(() {
+            canRecordVideo = status;
+          });
+        }
+      });
+    }
     _updateTimer = periodic_immediate(const Duration(seconds: 1), () async {
       await gFFI.serverModel.fetchID();
       final error = await bind.mainGetError();
@@ -744,6 +770,24 @@ class _DesktopHomePageState extends State<DesktopHomePage>
           });
         } else {
           watchIsCanRecordAudio = false;
+          setState(() {});
+        }
+      }
+      if (watchIsCanRecordVideo) {
+        if (isMacOS) {
+          Future.microtask(() async {
+            final status = await osxCanRecordVideo();
+            if (status == PermissionAuthorizeType.authorized) {
+              canRecordVideo = status;
+              watchIsCanRecordVideo = false;
+              setState(() {});
+            } else if (status != canRecordVideo) {
+              canRecordVideo = status;
+              setState(() {});
+            }
+          });
+        } else {
+          watchIsCanRecordVideo = false;
           setState(() {});
         }
       }

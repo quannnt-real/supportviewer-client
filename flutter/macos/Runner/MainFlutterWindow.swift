@@ -235,6 +235,25 @@ class MainFlutterWindow: NSWindow {
                         }
                     })
                     break
+                case "canRecordVideo":
+                    switch AVCaptureDevice.authorizationStatus(for: .video) {
+                    case .authorized:
+                        result(1)
+                        break
+                    case .notDetermined:
+                        result(0)
+                        break
+                    default:
+                        result(-1)
+                        break
+                    }
+                case "requestRecordVideo":
+                    AVCaptureDevice.requestAccess(for: .video, completionHandler: { granted in
+                        DispatchQueue.main.async {
+                            result(granted)
+                        }
+                    })
+                    break
                 case "bumpMouse":
                     var dx = 0
                     var dy = 0
