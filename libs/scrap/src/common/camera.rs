@@ -18,15 +18,40 @@ use crate::AdapterDevice;
 
 use crate::common::{bail, ResultType};
 use crate::{Frame, TraitCapturer};
+#[cfg(target_os = "macos")]
+use crate::PixelBuffer;
 #[cfg(any(target_os = "windows", target_os = "linux"))]
 use crate::{PixelBuffer, Pixfmt};
+
+#[cfg(target_os = "macos")]
+mod macos_ffi {
+    use std::ffi::c_void;
+    use std::os::raw::{c_char, c_int};
+
+    extern "C" {
+        pub fn sv_camera_auth_status() -> c_int;
+        pub fn sv_camera_count() -> c_int;
+        pub fn sv_camera_name(idx: c_int, buf: *mut c_char, len: c_int) -> c_int;
+        pub fn sv_camera_resolution(idx: c_int, w: *mut c_int, h: *mut c_int) -> c_int;
+        pub fn sv_camera_open(idx: c_int, w: *mut c_int, h: *mut c_int) -> *mut c_void;
+        pub fn sv_camera_frame(
+            h: *mut c_void,
+            dst: *mut u8,
+            dst_len: c_int,
+            w: *mut c_int,
+            h_out: *mut c_int,
+            stride: *mut c_int,
+        ) -> c_int;
+        pub fn sv_camera_close(h: *mut c_void);
+    }
+}
 
 pub const PRIMARY_CAMERA_IDX: usize = 0;
 lazy_static::lazy_static! {
     static ref SYNC_CAMERA_DISPLAYS: Arc<Mutex<Vec<DisplayInfo>>> = Arc::new(Mutex::new(Vec::new()));
 }
 
-#[cfg(not(any(target_os = "windows", target_os = "linux")))]
+#[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
 const CAMERA_NOT_SUPPORTED: &str = "This platform doesn't support camera yet";
 
 pub struct Cameras;
@@ -158,7 +183,99 @@ impl Cameras {
     }
 }
 
-#[cfg(not(any(target_os = "windows", target_os = "linux")))]
+#[cfg(target_os = "macos")]
+impl Cameras {
+    pub fn all_info() -> ResultType<Vec<DisplayInfo>> {
+        let mut camera_displays = SYNC_CAMERA_DISPLAYS.lock().unwrap();
+        camera_displays.clear();
+        if unsafe { macos_ffi::sv_camera_auth_status() } != 1 {
+            bail!("Camera permission not granted");
+        }
+        let count = unsafe { macos_ffi::sv_camera_count() };
+        if count <= 0 {
+            bail!("No camera found");
+        }
+        let mut x = 0;
+        for idx in 0..count {
+            let mut w: std::os::raw::c_int = 0;
+            let mut h: std::os::raw::c_int = 0;
+            if unsafe { macos_ffi::sv_camera_resolution(idx, &mut w, &mut h) } != 0
+                || w <= 0
+                || h <= 0
+            {
+                bail!("create camera{} error: failed to query resolution", idx);
+            }
+            let mut name_buf = [0i8; 256];
+            let name_len = unsafe {
+                macos_ffi::sv_camera_name(idx, name_buf.as_mut_ptr(), name_buf.len() as _)
+            };
+            let name = if name_len > 0 {
+                unsafe { std::ffi::CStr::from_ptr(name_buf.as_ptr()) }
+                    .to_string_lossy()
+                    .into_owned()
+            } else {
+                format!("Camera {}", idx)
+            };
+            let (width, height) = (w as i32, h as i32);
+            camera_displays.push(DisplayInfo {
+                x,
+                y: 0,
+                name,
+                width,
+                height,
+                online: true,
+                cursor_embedded: false,
+                scale: 1.0,
+                original_resolution: Some(Resolution {
+                    width,
+                    height,
+                    ..Default::default()
+                })
+                .into(),
+                ..Default::default()
+            });
+            x += width;
+        }
+        Ok(camera_displays.clone())
+    }
+
+    pub fn exists(index: usize) -> bool {
+        if unsafe { macos_ffi::sv_camera_auth_status() } != 1 {
+            return false;
+        }
+        let count = unsafe { macos_ffi::sv_camera_count() };
+        count > 0 && index < count as usize
+    }
+
+    pub fn get_camera_resolution(index: usize) -> ResultType<Resolution> {
+        if unsafe { macos_ffi::sv_camera_auth_status() } != 1 {
+            bail!("Camera permission not granted");
+        }
+        let mut w: std::os::raw::c_int = 0;
+        let mut h: std::os::raw::c_int = 0;
+        if unsafe { macos_ffi::sv_camera_resolution(index as _, &mut w, &mut h) } != 0
+            || w <= 0
+            || h <= 0
+        {
+            bail!("create camera{} error: failed to query resolution", index);
+        }
+        Ok(Resolution {
+            width: w as i32,
+            height: h as i32,
+            ..Default::default()
+        })
+    }
+
+    pub fn get_sync_cameras() -> Vec<DisplayInfo> {
+        SYNC_CAMERA_DISPLAYS.lock().unwrap().clone()
+    }
+
+    pub fn get_capturer(current: usize) -> ResultType<Box<dyn TraitCapturer>> {
+        Ok(Box::new(CameraCapturer::new(current)?))
+    }
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
 impl Cameras {
     pub fn all_info() -> ResultType<Vec<DisplayInfo>> {
         return Ok(Vec::new());
@@ -188,7 +305,29 @@ pub struct CameraCapturer {
     last_data: Vec<u8>, // for faster compare and copy
 }
 
-#[cfg(not(any(target_os = "windows", target_os = "linux")))]
+#[cfg(target_os = "macos")]
+pub struct CameraCapturer {
+    handle: *mut std::ffi::c_void,
+    width: usize,
+    height: usize,
+    stride: usize,
+    data: Vec<u8>,
+    last_data: Vec<u8>,
+}
+
+#[cfg(target_os = "macos")]
+impl Drop for CameraCapturer {
+    fn drop(&mut self) {
+        if !self.handle.is_null() {
+            unsafe {
+                macos_ffi::sv_camera_close(self.handle);
+            }
+            self.handle = std::ptr::null_mut();
+        }
+    }
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
 pub struct CameraCapturer;
 
 impl CameraCapturer {
@@ -203,8 +342,32 @@ impl CameraCapturer {
         })
     }
 
+    #[cfg(target_os = "macos")]
+    fn new(current: usize) -> ResultType<Self> {
+        if unsafe { macos_ffi::sv_camera_auth_status() } != 1 {
+            bail!("Camera permission not granted");
+        }
+        let mut w: std::os::raw::c_int = 0;
+        let mut h: std::os::raw::c_int = 0;
+        let handle = unsafe { macos_ffi::sv_camera_open(current as _, &mut w, &mut h) };
+        if handle.is_null() || w <= 0 || h <= 0 {
+            bail!("create camera{} error: failed to open camera", current);
+        }
+        let width = w as usize;
+        let height = h as usize;
+        let stride = width * 4;
+        Ok(CameraCapturer {
+            handle,
+            width,
+            height,
+            stride,
+            data: vec![0u8; stride * height],
+            last_data: Vec::new(),
+        })
+    }
+
     #[allow(dead_code)]
-    #[cfg(not(any(target_os = "windows", target_os = "linux")))]
+    #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
     fn new(_current: usize) -> ResultType<Self> {
         bail!(CAMERA_NOT_SUPPORTED);
     }
@@ -258,7 +421,67 @@ impl TraitCapturer for CameraCapturer {
         }
     }
 
-    #[cfg(not(any(target_os = "windows", target_os = "linux")))]
+    #[cfg(target_os = "macos")]
+    fn frame<'a>(&'a mut self, _timeout: std::time::Duration) -> std::io::Result<Frame<'a>> {
+        let mut w: std::os::raw::c_int = 0;
+        let mut h: std::os::raw::c_int = 0;
+        let mut stride: std::os::raw::c_int = 0;
+        let mut rc = unsafe {
+            macos_ffi::sv_camera_frame(
+                self.handle,
+                self.data.as_mut_ptr(),
+                self.data.len() as _,
+                &mut w,
+                &mut h,
+                &mut stride,
+            )
+        };
+        if rc == -3 && w > 0 && h > 0 && stride >= w * 4 {
+            let needed = (stride as usize) * (h as usize);
+            self.data.resize(needed, 0);
+            rc = unsafe {
+                macos_ffi::sv_camera_frame(
+                    self.handle,
+                    self.data.as_mut_ptr(),
+                    self.data.len() as _,
+                    &mut w,
+                    &mut h,
+                    &mut stride,
+                )
+            };
+        }
+        if rc == 0 {
+            return Err(io::ErrorKind::WouldBlock.into());
+        }
+        if rc < 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::Other,
+                format!("Camera frame error: {}", rc),
+            ));
+        }
+        let width = w as usize;
+        let height = h as usize;
+        let row_stride = stride as usize;
+        let used = row_stride * height;
+        if used > self.data.len() || width == 0 || height == 0 || row_stride < width * 4 {
+            return Err(io::Error::new(
+                io::ErrorKind::Other,
+                "Invalid camera frame dimensions",
+            ));
+        }
+        self.width = width;
+        self.height = height;
+        self.stride = row_stride;
+        crate::would_block_if_equal(&mut self.last_data, &self.data[..used])?;
+        Ok(Frame::PixelBuffer(PixelBuffer::from_bytes(
+            &self.data[..used],
+            self.width,
+            self.height,
+            self.stride,
+        )))
+    }
+
+    #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
     fn frame<'a>(&'a mut self, _timeout: std::time::Duration) -> std::io::Result<Frame<'a>> {
         Err(io::Error::new(
             io::ErrorKind::Other,

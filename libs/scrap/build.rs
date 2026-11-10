@@ -260,6 +260,16 @@ fn main() {
     } else if cfg!(target_os = "macos") {
         // Quartz is second because macOS is the (annoying) exception.
         println!("cargo:rustc-cfg=quartz");
+        let file = "src/quartz/camera.m";
+        cc::Build::new()
+            .file(file)
+            .flag("-fobjc-arc")
+            .compile("scrap_macos_camera");
+        println!("cargo:rerun-if-changed={}", file);
+        println!("cargo:rustc-link-lib=framework=AVFoundation");
+        println!("cargo:rustc-link-lib=framework=CoreMedia");
+        println!("cargo:rustc-link-lib=framework=CoreVideo");
+        println!("cargo:rustc-link-lib=framework=Foundation");
     } else if cfg!(unix) {
         // On UNIX we pray that X11 (with XCB) is available.
         println!("cargo:rustc-cfg=x11");
