@@ -1,5 +1,4 @@
 use crate::{quartz, Frame, Pixfmt};
-use std::marker::PhantomData;
 use std::sync::{Arc, Mutex, TryLockError};
 use std::{io, mem};
 
@@ -56,10 +55,11 @@ impl crate::TraitCapturer for Capturer {
                         crate::would_block_if_equal(&mut self.saved_raw_data, frame.inner())?;
                         frame.surface_to_bgra(self.height());
                         Ok(Frame::PixelBuffer(PixelBuffer {
-                            frame,
-                            data: PhantomData,
+                            frame: Some(frame),
+                            data: &[],
                             width: self.width(),
                             height: self.height(),
+                            stride: 0,
                         }))
                     }
 
@@ -75,15 +75,31 @@ impl crate::TraitCapturer for Capturer {
 }
 
 pub struct PixelBuffer<'a> {
-    frame: quartz::Frame,
-    data: PhantomData<&'a [u8]>,
+    frame: Option<quartz::Frame>,
+    data: &'a [u8],
     width: usize,
     height: usize,
+    stride: usize,
+}
+
+impl<'a> PixelBuffer<'a> {
+    pub fn from_bytes(data: &'a [u8], width: usize, height: usize, stride: usize) -> Self {
+        Self {
+            frame: None,
+            data,
+            width,
+            height,
+            stride,
+        }
+    }
 }
 
 impl<'a> crate::TraitPixelBuffer for PixelBuffer<'a> {
     fn data(&self) -> &[u8] {
-        &*self.frame
+        match &self.frame {
+            Some(frame) => &*frame,
+            None => self.data,
+        }
     }
 
     fn width(&self) -> usize {
@@ -96,7 +112,10 @@ impl<'a> crate::TraitPixelBuffer for PixelBuffer<'a> {
 
     fn stride(&self) -> Vec<usize> {
         let mut v = Vec::new();
-        v.push(self.frame.stride());
+        v.push(match &self.frame {
+            Some(frame) => frame.stride(),
+            None => self.stride,
+        });
         v
     }
 
@@ -147,5 +166,33 @@ impl Display {
 
     pub fn is_primary(&self) -> bool {
         self.0.is_primary()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::TraitPixelBuffer;
+
+    #[test]
+    fn test_pixel_buffer_from_bytes() {
+        let raw = vec![1u8, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
+        let pb = PixelBuffer::from_bytes(&raw, 2, 2, 8);
+        assert_eq!(pb.data(), &raw[..]);
+        assert_eq!(pb.width(), 2);
+        assert_eq!(pb.height(), 2);
+        assert_eq!(pb.stride(), vec![8]);
+        assert_eq!(pb.pixfmt(), Pixfmt::BGRA);
+    }
+
+    #[test]
+    fn test_pixel_buffer_from_bytes_padded_stride() {
+        let raw = vec![0xAAu8; 32];
+        let pb = PixelBuffer::from_bytes(&raw, 3, 2, 16);
+        assert_eq!(pb.data().len(), 32);
+        assert_eq!(pb.width(), 3);
+        assert_eq!(pb.height(), 2);
+        assert_eq!(pb.stride(), vec![16]);
+        assert_eq!(pb.pixfmt(), Pixfmt::BGRA);
     }
 }
