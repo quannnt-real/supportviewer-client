@@ -266,6 +266,7 @@ fn main() {
             .flag("-fobjc-arc")
             .compile("scrap_macos_camera");
         println!("cargo:rerun-if-changed={}", file);
+        println!("cargo:rustc-link-lib=framework=Accelerate");
         println!("cargo:rustc-link-lib=framework=AVFoundation");
         println!("cargo:rustc-link-lib=framework=CoreMedia");
         println!("cargo:rustc-link-lib=framework=CoreVideo");

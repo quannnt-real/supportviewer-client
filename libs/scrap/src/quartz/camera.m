@@ -1,3 +1,4 @@
+#import <Accelerate/Accelerate.h>
 #import <AVFoundation/AVFoundation.h>
 #import <CoreMedia/CoreMedia.h>
 #import <CoreVideo/CoreVideo.h>
@@ -31,7 +32,19 @@ static NSArray<AVCaptureDevice *> *sv_list_video_devices(void) {
     if (!devices || devices.count == 0) {
         return @[];
     }
+    // Index 0 is the camera shown by default. Put the built-in camera there: a virtual
+    // camera (OBS, Elgato...) can sort first by uniqueID, and the system default camera
+    // follows the user's last choice on macOS 14+, so neither is a stable pick.
     return [devices sortedArrayUsingComparator:^NSComparisonResult(AVCaptureDevice *a, AVCaptureDevice *b) {
+        BOOL aBuiltIn = NO;
+        BOOL bBuiltIn = NO;
+        if (@available(macOS 10.15, *)) {
+            aBuiltIn = [a.deviceType isEqualToString:AVCaptureDeviceTypeBuiltInWideAngleCamera];
+            bBuiltIn = [b.deviceType isEqualToString:AVCaptureDeviceTypeBuiltInWideAngleCamera];
+        }
+        if (aBuiltIn != bBuiltIn) {
+            return aBuiltIn ? NSOrderedAscending : NSOrderedDescending;
+        }
         NSString *idA = a.uniqueID ?: @"";
         NSString *idB = b.uniqueID ?: @"";
         return [idA compare:idB];
@@ -67,6 +80,8 @@ static void sv_select_preset(AVCaptureDevice *device, NSString **outPreset, int 
     int _frameWidth;
     int _frameHeight;
     int _frameStride;
+    int _targetWidth;
+    int _targetHeight;
     BOOL _hasNewFrame;
     BOOL _hasError;
 }
@@ -81,6 +96,8 @@ static void sv_select_preset(AVCaptureDevice *device, NSString **outPreset, int 
         _frameWidth = 0;
         _frameHeight = 0;
         _frameStride = 0;
+        _targetWidth = 0;
+        _targetHeight = 0;
         _hasNewFrame = NO;
         _hasError = NO;
     }
@@ -115,7 +132,21 @@ didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
         size_t width = CVPixelBufferGetWidth(pixelBuffer);
         size_t height = CVPixelBufferGetHeight(pixelBuffer);
         size_t stride = CVPixelBufferGetBytesPerRow(pixelBuffer);
-        size_t totalBytes = stride * height;
+        // The encoder is sized from sv_camera_resolution, and a larger frame makes it fail.
+        // Some cameras ignore the session preset (OBS Virtual Camera sends 1920x1080), and
+        // virtual cameras deliver nothing when the output size is pinned, so scale here instead.
+        size_t outW = width;
+        size_t outH = height;
+        size_t outStride = stride;
+        BOOL needScale = NO;
+        if (_targetWidth > 0 && _targetHeight > 0
+            && (width != (size_t)_targetWidth || height != (size_t)_targetHeight)) {
+            outW = (size_t)_targetWidth;
+            outH = (size_t)_targetHeight;
+            outStride = outW * 4;
+            needScale = YES;
+        }
+        size_t totalBytes = outStride * outH;
 
         if (baseAddr && width > 0 && height > 0 && stride >= width * 4 && totalBytes > 0) {
             os_unfair_lock_lock(&_lock);
@@ -128,11 +159,20 @@ didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
                     }
                 }
                 if (_buffer && _bufferCap >= totalBytes) {
-                    memcpy(_buffer, baseAddr, totalBytes);
-                    _frameWidth = (int)width;
-                    _frameHeight = (int)height;
-                    _frameStride = (int)stride;
-                    _hasNewFrame = YES;
+                    BOOL ok = YES;
+                    if (needScale) {
+                        vImage_Buffer src = {baseAddr, height, width, stride};
+                        vImage_Buffer dst = {_buffer, outH, outW, outStride};
+                        ok = vImageScale_ARGB8888(&src, &dst, NULL, kvImageNoFlags) == kvImageNoError;
+                    } else {
+                        memcpy(_buffer, baseAddr, totalBytes);
+                    }
+                    if (ok) {
+                        _frameWidth = (int)outW;
+                        _frameHeight = (int)outH;
+                        _frameStride = (int)outStride;
+                        _hasNewFrame = YES;
+                    }
                 }
             }
             os_unfair_lock_unlock(&_lock);
@@ -244,8 +284,6 @@ void *sv_camera_open(int idx, int *w, int *h) {
             session.sessionPreset = preset;
         } else if ([session canSetSessionPreset:AVCaptureSessionPreset640x480]) {
             session.sessionPreset = AVCaptureSessionPreset640x480;
-            presetW = 640;
-            presetH = 480;
         }
 
         if (![session canAddInput:input]) {
@@ -274,6 +312,8 @@ void *sv_camera_open(int idx, int *w, int *h) {
         ctx->_frameWidth = presetW;
         ctx->_frameHeight = presetH;
         ctx->_frameStride = presetW * 4;
+        ctx->_targetWidth = presetW;
+        ctx->_targetHeight = presetH;
 
         [output setSampleBufferDelegate:ctx queue:ctx->_queue];
         [session commitConfiguration];
