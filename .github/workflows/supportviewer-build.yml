@@ -9,7 +9,7 @@ on:
       upload-tag:
         description: "Ten tag release de dinh file build"
         type: string
-        default: "sv-1.5.2"
+        default: "sv-1.5.3"
       publish-update-metadata:
         description: "Dang metadata cap nhat tu dong (tat khi build ban thu)"
         type: boolean

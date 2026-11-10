@@ -48,7 +48,7 @@ env:
   VCPKG_COMMIT_ID: "9e593bb18ea69cc5095e012465dcd675a822ed0d"
   VCPKG_CMAKE_VERSION: "4.3.0"
   ARMV7_VCPKG_COMMIT_ID: "6f29f12e82a8293156836ad81cc9bf5af41fe836" # 2025.01.13, got "/opt/artifacts/vcpkg/vcpkg: No such file or directory" with latest version
-  VERSION: "1.5.2"
+  VERSION: "1.5.3"
   NDK_VERSION: "r28c"
   #signing keys env variable checks
   ANDROID_SIGNING_KEY: "${{ secrets.ANDROID_SIGNING_KEY }}"
@@ -1183,6 +1183,16 @@ jobs:
               fi
               if [ -f "$APP/Contents/MacOS/service" ]; then
                   "$APP/Contents/MacOS/service" --install-service 2>/dev/null || true
+              fi
+              # Installing over a running copy only replaces files on disk: the agent that
+              # answers connections (--server) keeps running the old binary until restarted.
+              launchctl kickstart -k system/com.supportviewer.SupportViewer_service 2>/dev/null || true
+              CONSOLE_USER=$(stat -f%Su /dev/console 2>/dev/null || true)
+              if [ -n "$CONSOLE_USER" ] && [ "$CONSOLE_USER" != "root" ]; then
+                  CONSOLE_UID=$(id -u "$CONSOLE_USER" 2>/dev/null || true)
+                  if [ -n "$CONSOLE_UID" ]; then
+                      launchctl kickstart -k gui/"$CONSOLE_UID"/com.supportviewer.SupportViewer_server 2>/dev/null || true
+                  fi
               fi
           fi
           exit 0
