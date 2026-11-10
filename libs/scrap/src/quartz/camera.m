@@ -8,9 +8,18 @@
 #include <stdlib.h>
 #include <string.h>
 
+// Not @available: it emits a call to ___isPlatformVersionAtLeast (compiler-rt), which
+// rustc does not link on x86_64-apple-darwin, so the release build fails to link.
+static BOOL sv_os_at_least_10_15(void) {
+    NSOperatingSystemVersion v = {10, 15, 0};
+    return [[NSProcessInfo processInfo] isOperatingSystemAtLeastVersion:v];
+}
+
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wunguarded-availability-new"
 static NSArray<AVCaptureDevice *> *sv_list_video_devices(void) {
     NSArray<AVCaptureDevice *> *devices = nil;
-    if (@available(macOS 10.15, *)) {
+    if (sv_os_at_least_10_15()) {
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
         NSArray<AVCaptureDeviceType> *types = @[
@@ -35,10 +44,11 @@ static NSArray<AVCaptureDevice *> *sv_list_video_devices(void) {
     // Index 0 is the camera shown by default. Put the built-in camera there: a virtual
     // camera (OBS, Elgato...) can sort first by uniqueID, and the system default camera
     // follows the user's last choice on macOS 14+, so neither is a stable pick.
+    BOOL hasDeviceType = sv_os_at_least_10_15();
     return [devices sortedArrayUsingComparator:^NSComparisonResult(AVCaptureDevice *a, AVCaptureDevice *b) {
         BOOL aBuiltIn = NO;
         BOOL bBuiltIn = NO;
-        if (@available(macOS 10.15, *)) {
+        if (hasDeviceType) {
             aBuiltIn = [a.deviceType isEqualToString:AVCaptureDeviceTypeBuiltInWideAngleCamera];
             bBuiltIn = [b.deviceType isEqualToString:AVCaptureDeviceTypeBuiltInWideAngleCamera];
         }
@@ -50,6 +60,7 @@ static NSArray<AVCaptureDevice *> *sv_list_video_devices(void) {
         return [idA compare:idB];
     }];
 }
+#pragma clang diagnostic pop
 
 static void sv_select_preset(AVCaptureDevice *device, NSString **outPreset, int *outW, int *outH) {
     if ([device supportsAVCaptureSessionPreset:AVCaptureSessionPreset1280x720]) {
